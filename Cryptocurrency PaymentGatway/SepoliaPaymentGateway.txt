@@ -1,0 +1,359 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract SepoliaPaymentGateway {
+    address payable public owner;
+    uint256 public minDeposit;
+    uint256 public transactionCount;
+    
+    struct Transaction {
+        address user;
+        uint256 amount;
+        uint256 timestamp;
+        bool isDeposit;
+    }
+    
+    mapping(address => uint256) public balances;
+    mapping(uint256 => Transaction) public transactions;
+    
+    event PaymentReceived(address indexed from, uint256 amount, uint256 transactionId);
+    event PaymentSent(address indexed to, uint256 amount, uint256 transactionId);
+    
+    constructor() {
+        owner = payable(msg.sender);
+        minDeposit = 0.01 ether;
+        transactionCount = 0;
+    }
+    
+    receive() external payable {
+        deposit();
+    }
+    
+    function deposit() public payable {
+        require(msg.value >= minDeposit, "Minimum deposit is 0.01 ETH");
+        
+        balances[msg.sender] += msg.value;
+        
+        transactions[transactionCount] = Transaction({
+            user: msg.sender,
+            amount: msg.value,
+            timestamp: block.timestamp,
+            isDeposit: true
+        });
+        
+        emit PaymentReceived(msg.sender, msg.value, transactionCount);
+        transactionCount++;
+    }
+    
+    function withdraw(uint256 amount) public {
+        require(balances[msg.sender] >= amount, "Insufficient balance");
+        require(amount > 0, "Amount must be greater than 0");
+        
+        balances[msg.sender] -= amount;
+        
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "Transfer failed");
+        
+        transactions[transactionCount] = Transaction({
+            user: msg.sender,
+            amount: amount,
+            timestamp: block.timestamp,
+            isDeposit: false
+        });
+        
+        emit PaymentSent(msg.sender, amount, transactionCount);
+        transactionCount++;
+    }
+    
+    function getBalance() public view returns (uint256) {
+        return balances[msg.sender];
+    }
+    
+    function transfer(address payable _to, uint256 _amount) public {
+        require(_to != address(0), "Invalid recipient address");
+        require(_amount > 0, "Amount must be greater than 0");
+        require(balances[msg.sender] >= _amount, "Insufficient balance");
+        
+        balances[msg.sender] -= _amount;
+        balances[_to] += _amount;
+        
+        transactions[transactionCount] = Transaction({
+            user: msg.sender,
+            amount: _amount,
+            timestamp: block.timestamp,
+            isDeposit: false
+        });
+        
+        emit PaymentSent(msg.sender, _amount, transactionCount);
+        transactionCount++;
+    }
+    
+    function getTransaction(uint256 _transactionId) public view returns (
+        address user,
+        uint256 amount,
+        uint256 timestamp,
+        bool isDeposit
+    ) {
+        Transaction memory txn = transactions[_transactionId];
+        return (txn.user, txn.amount, txn.timestamp, txn.isDeposit);
+    }
+    
+    struct FiatRate {
+        uint256 rate;     // Rate in Wei (1 Fiat = X Wei)
+        uint256 decimals; // Number of decimals for the fiat currency
+        bool isActive;    // Whether this currency is active
+    }
+    
+    mapping(string => FiatRate) public fiatRates;
+    
+    event FiatRateUpdated(string currency, uint256 rate);
+    event FiatPaymentReceived(address indexed from, string currency, uint256 fiatAmount, uint256 ethAmount);
+    event FiatPaymentSent(address indexed to, string currency, uint256 fiatAmount, uint256 ethAmount);
+    
+    function validateCurrency(string memory currency) internal pure {
+        require(bytes(currency).length > 0 && bytes(currency).length <= 5, "Invalid currency code length");
+    }
+    
+    function setFiatRate(string memory currency, uint256 rate, uint256 decimals) public {
+        require(msg.sender == owner, "Only owner can set rates");
+        require(rate > 0, "Rate must be greater than 0");
+        require(decimals <= 18, "Decimals must be <= 18");
+        validateCurrency(currency);
+        
+        fiatRates[currency] = FiatRate(rate, decimals, true);
+        emit FiatRateUpdated(currency, rate);
+    }
+    
+    function setFiatRateStatus(string memory currency, bool isActive) public {
+        require(msg.sender == owner, "Only owner can update status");
+        validateCurrency(currency);
+        require(fiatRates[currency].rate > 0, "Currency not found");
+        
+        FiatRate storage rate = fiatRates[currency];
+        rate.isActive = isActive;
+        emit FiatRateUpdated(currency, rate.rate);
+    }
+    
+    function depositFiat(string memory currency, uint256 fiatAmount) public payable {
+        FiatRate memory rate = fiatRates[currency];
+        require(rate.isActive, "Currency not supported");
+        
+        uint256 ethAmount = (fiatAmount * rate.rate) / (10 ** rate.decimals);
+        require(msg.value >= ethAmount, "Insufficient ETH sent");
+        
+        // Only add the required amount to balance
+        balances[msg.sender] += ethAmount;
+        
+        // Refund excess ETH if any
+        if (msg.value > ethAmount) {
+            uint256 refundAmount = msg.value - ethAmount;
+            (bool success, ) = payable(msg.sender).call{value: refundAmount}("");
+            require(success, "Refund failed");
+        }
+        
+        transactions[transactionCount] = Transaction({
+            user: msg.sender,
+            amount: ethAmount,  // Store actual ETH amount, not msg.value
+            timestamp: block.timestamp,
+            isDeposit: true
+        });
+        
+        emit FiatPaymentReceived(msg.sender, currency, fiatAmount, ethAmount);
+        emit PaymentReceived(msg.sender, ethAmount, transactionCount);
+        transactionCount++;
+    }
+    
+    function withdrawFiat(string memory currency, uint256 fiatAmount) public {
+        FiatRate memory rate = fiatRates[currency];
+        require(rate.isActive, "Currency not supported");
+        
+        uint256 ethAmount = (fiatAmount * rate.rate) / (10 ** rate.decimals);
+        require(balances[msg.sender] >= ethAmount, "Insufficient balance");
+        
+        balances[msg.sender] -= ethAmount;
+        
+        (bool success, ) = payable(msg.sender).call{value: ethAmount}("");
+        require(success, "Transfer failed");
+        
+        transactions[transactionCount] = Transaction({
+            user: msg.sender,
+            amount: ethAmount,
+            timestamp: block.timestamp,
+            isDeposit: false
+        });
+        
+        emit FiatPaymentSent(msg.sender, currency, fiatAmount, ethAmount);
+        emit PaymentSent(msg.sender, ethAmount, transactionCount);
+        transactionCount++;
+    }
+    
+    function getFiatRate(string memory currency) public view returns (
+        uint256 rate,
+        uint256 decimals,
+        bool isActive
+    ) {
+        FiatRate memory fiatRate = fiatRates[currency];
+        return (fiatRate.rate, fiatRate.decimals, fiatRate.isActive);
+    }
+    
+    function convertFiatToEth(string memory currency, uint256 fiatAmount) public view returns (uint256) {
+        FiatRate memory rate = fiatRates[currency];
+        require(rate.isActive, "Currency not supported");
+        return (fiatAmount * rate.rate) / (10 ** rate.decimals);
+    }
+    
+    function convertEthToFiat(string memory currency, uint256 ethAmount) public view returns (uint256) {
+        FiatRate memory rate = fiatRates[currency];
+        require(rate.isActive, "Currency not supported");
+        return (ethAmount * (10 ** rate.decimals)) / rate.rate;
+    }
+    
+    // Remove duplicate getTransaction function here
+    
+    struct LiquidityPool {
+        uint256 ethReserve;
+        uint256 tokenReserve;
+        uint256 totalLiquidity;
+        bool isActive;
+    }
+    
+    struct UserLiquidity {
+        uint256 amount;
+        uint256 ethShare;
+        uint256 tokenShare;
+    }
+    
+    mapping(string => LiquidityPool) public liquidityPools;
+    mapping(address => mapping(string => UserLiquidity)) public userLiquidity;
+    
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
+    uint256 private constant FEE_PERCENT = 30; // 0.3% fee
+    
+    event LiquidityAdded(address indexed provider, string currency, uint256 ethAmount, uint256 tokenAmount);
+    event LiquidityRemoved(address indexed provider, string currency, uint256 ethAmount, uint256 tokenAmount);
+    event Swap(address indexed user, string currency, uint256 amountIn, uint256 amountOut, bool ethToToken);
+    
+    function addLiquidity(string memory currency, uint256 tokenAmount) public payable {
+        validateCurrency(currency);
+        require(fiatRates[currency].isActive, "Currency not supported");
+        require(msg.value > 0 && tokenAmount > 0, "Invalid amounts");
+        
+        LiquidityPool storage pool = liquidityPools[currency];
+        UserLiquidity storage userLiq = userLiquidity[msg.sender][currency];
+        
+        uint256 liquidity;
+        if (pool.totalLiquidity == 0) {
+            liquidity = sqrt(msg.value * tokenAmount) - MINIMUM_LIQUIDITY;
+            pool.totalLiquidity = MINIMUM_LIQUIDITY;
+            pool.isActive = true;
+        } else {
+            uint256 ethLiquidity = (msg.value * pool.totalLiquidity) / pool.ethReserve;
+            uint256 tokenLiquidity = (tokenAmount * pool.totalLiquidity) / pool.tokenReserve;
+            liquidity = ethLiquidity < tokenLiquidity ? ethLiquidity : tokenLiquidity;
+        }
+        
+        pool.ethReserve += msg.value;
+        pool.tokenReserve += tokenAmount;
+        pool.totalLiquidity += liquidity;
+        
+        userLiq.amount += liquidity;
+        userLiq.ethShare += msg.value;
+        userLiq.tokenShare += tokenAmount;
+        
+        emit LiquidityAdded(msg.sender, currency, msg.value, tokenAmount);
+    }
+    
+    function removeLiquidity(string memory currency, uint256 liquidity) public {
+        validateCurrency(currency);
+        LiquidityPool storage pool = liquidityPools[currency];
+        UserLiquidity storage userLiq = userLiquidity[msg.sender][currency];
+        
+        require(liquidity > 0 && userLiq.amount >= liquidity, "Invalid liquidity amount");
+        
+        uint256 ethAmount = (liquidity * pool.ethReserve) / pool.totalLiquidity;
+        uint256 tokenAmount = (liquidity * pool.tokenReserve) / pool.totalLiquidity;
+        
+        pool.ethReserve -= ethAmount;
+        pool.tokenReserve -= tokenAmount;
+        pool.totalLiquidity -= liquidity;
+        
+        userLiq.amount -= liquidity;
+        userLiq.ethShare -= ethAmount;
+        userLiq.tokenShare -= tokenAmount;
+        
+        (bool success, ) = payable(msg.sender).call{value: ethAmount}("");
+        require(success, "ETH transfer failed");
+        
+        emit LiquidityRemoved(msg.sender, currency, ethAmount, tokenAmount);
+    }
+    
+    function swapExactETHForTokens(string memory currency) public payable {
+        validateCurrency(currency);
+        LiquidityPool storage pool = liquidityPools[currency];
+        require(pool.isActive, "Pool not active");
+        require(msg.value > 0, "Invalid ETH amount");
+        
+        uint256 amountIn = msg.value;
+        uint256 amountInWithFee = amountIn * (1000 - FEE_PERCENT);
+        uint256 amountOut = (pool.tokenReserve * amountInWithFee) / 
+                           (pool.ethReserve * 1000 + amountInWithFee);
+        
+        pool.ethReserve += amountIn;
+        pool.tokenReserve -= amountOut;
+        
+        emit Swap(msg.sender, currency, amountIn, amountOut, true);
+    }
+    
+    function swapExactTokensForETH(string memory currency, uint256 tokenAmount) public {
+        validateCurrency(currency);
+        LiquidityPool storage pool = liquidityPools[currency];
+        require(pool.isActive, "Pool not active");
+        require(tokenAmount > 0, "Invalid token amount");
+        
+        uint256 amountInWithFee = tokenAmount * (1000 - FEE_PERCENT);
+        uint256 ethOut = (pool.ethReserve * amountInWithFee) / 
+                        (pool.tokenReserve * 1000 + amountInWithFee);
+        
+        pool.tokenReserve += tokenAmount;
+        pool.ethReserve -= ethOut;
+        
+        (bool success, ) = payable(msg.sender).call{value: ethOut}("");
+        require(success, "ETH transfer failed");
+        
+        emit Swap(msg.sender, currency, tokenAmount, ethOut, false);
+    }
+    
+    function getPoolInfo(string memory currency) public view returns (
+        uint256 ethReserve,
+        uint256 tokenReserve,
+        uint256 totalLiquidity,
+        bool isActive
+    ) {
+        LiquidityPool memory pool = liquidityPools[currency];
+        return (pool.ethReserve, pool.tokenReserve, pool.totalLiquidity, pool.isActive);
+    }
+    
+    function getUserLiquidity(string memory currency) public view returns (
+        uint256 amount,
+        uint256 ethShare,
+        uint256 tokenShare
+    ) {
+        UserLiquidity memory userLiq = userLiquidity[msg.sender][currency];
+        return (userLiq.amount, userLiq.ethShare, userLiq.tokenShare);
+    }
+    
+    // Helper function to calculate square root
+    function sqrt(uint256 y) internal pure returns (uint256 z) {
+        if (y > 3) {
+            z = y;
+            uint256 x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            }
+        } else if (y != 0) {
+            z = 1;
+        }
+    }
+    
+}

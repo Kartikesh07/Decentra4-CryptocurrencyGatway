@@ -1,0 +1,115 @@
+/* Base styles */
+#root {
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  min-height: 100vh;
+  background: linear-gradient(to bottom, #0f172a, #1e293b);
+}
+
+/* Main container styles */
+.min-h-screen {
+  background: radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.1), transparent 70%);
+}
+
+/* Card and container backgrounds */
+.bg-gray-900\/60 {
+  background-color: rgba(17, 24, 39, 0.85) !important;
+}
+
+/* Text colors */
+.text-gray-100 {
+  color: #f3f4f6 !important;
+}
+
+.text-gray-400 {
+  color: #9ca3af !important;
+}
+
+/* Input fields */
+input {
+  background-color: rgba(17, 24, 39, 0.95) !important;
+  border-color: rgba(75, 85, 99, 0.3) !important;
+}
+
+input:focus {
+  border-color: rgba(147, 51, 234, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(147, 51, 234, 0.2) !important;
+}
+
+/* Buttons */
+button {
+  background-image: linear-gradient(to right, #4f46e5, #7c3aed) !important;
+  transition: all 0.3s ease !important;
+}
+
+button:hover:not(:disabled) {
+  background-image: linear-gradient(to right, #4338ca, #6d28d9) !important;
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  opacity: 0.6 !important;
+}
+
+/* Notification styles */
+.bg-red-900\/30 {
+  background-color: rgba(127, 29, 29, 0.9) !important;
+}
+
+.bg-green-900\/30 {
+  background-color: rgba(20, 83, 45, 0.9) !important;
+}
+
+/* Glass effect enhancement */
+.backdrop-blur-lg {
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+}
+
+/* Navigation tabs */
+.flex.justify-center button {
+  background: rgba(31, 41, 55, 0.7) !important;
+  border: 1px solid rgba(75, 85, 99, 0.2);
+}
+
+.flex.justify-center button.bg-blue-500 {
+  background: linear-gradient(to right, #4f46e5, #7c3aed) !important;
+  border: none;
+}
+
+/* Balance card enhancement */
+.bg-gradient-to-r {
+  background-size: 200% auto;
+  animation: gradient 8s linear infinite;
+}
+
+@keyframes gradient {
+  0% {
+    background-position: 0% center;
+  }
+  50% {
+    background-position: 100% center;
+  }
+  100% {
+    background-position: 0% center;
+  }
+}
+
+/* Container shadows */
+.shadow-xl {
+  box-shadow: 0 0 25px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Responsive padding adjustments */
+@media (max-width: 768px) {
+  .p-6 {
+    padding: 1rem !important;
+  }
+  
+  .max-w-7xl {
+    padding: 0.5rem !important;
+  }
+}
+
+
